@@ -1,18 +1,70 @@
-import { BottomTabBarButtonProps } from '@react-navigation/bottom-tabs';
-import { PlatformPressable } from '@react-navigation/elements';
-import * as Haptics from 'expo-haptics';
+import React from "react";
+import { Pressable, Text, StyleSheet } from "react-native";
+import * as Haptics from "expo-haptics";
+import Animated, {
+  useAnimatedStyle,
+  withSpring,
+} from "react-native-reanimated";
+import { useSharedValue } from "react-native-reanimated";
 
-export function HapticTab(props: BottomTabBarButtonProps) {
+type HapticTabProps = {
+  label: string;
+  onPress?: () => void;
+};
+
+export default function HapticTab({ label, onPress }: HapticTabProps) {
+  const scale = useSharedValue(1);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: scale.value }],
+  }));
+
+  const handlePressIn = () => {
+    scale.value = withSpring(0.95);
+  };
+
+  const handlePressOut = () => {
+    scale.value = withSpring(1);
+    Haptics.selectionAsync();
+    onPress?.();
+  };
+
   return (
-    <PlatformPressable
-      {...props}
-      onPressIn={(ev) => {
-        if (process.env.EXPO_OS === 'ios') {
-          // Add a soft haptic feedback when pressing down on the tabs.
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-        }
-        props.onPressIn?.(ev);
-      }}
-    />
+    <Animated.View style={[styles.button, animatedStyle]}>
+      <Pressable
+        onPressIn={handlePressIn}
+        onPressOut={handlePressOut}
+        style={({ pressed }) => [
+          styles.pressable,
+          { opacity: pressed ? 0.7 : 1 },
+        ]}
+      >
+        <Text style={styles.text}>{label}</Text>
+      </Pressable>
+    </Animated.View>
   );
 }
+
+const styles = StyleSheet.create({
+  button: {
+    margin: 8,
+    borderRadius: 12,
+    overflow: "hidden",
+    backgroundColor: "#007AFF",
+    shadowColor: "#000",
+    shadowOpacity: 0.2,
+    shadowOffset: { width: 0, height: 2 },
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  pressable: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+  },
+  text: {
+    color: "#fff",
+    fontSize: 16,
+    fontWeight: "600",
+    textAlign: "center",
+  },
+});

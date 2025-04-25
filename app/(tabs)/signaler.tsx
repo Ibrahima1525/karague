@@ -10,20 +10,28 @@ import {
   Image,
   ScrollView,
   ActivityIndicator,
+  TouchableOpacity,
 } from "react-native";
 import * as Location from "expo-location";
 import * as ImagePicker from "expo-image-picker";
-import { db } from "../firebase";
-import { collection, addDoc } from "firebase/firestore";
+import MapView, { Marker } from "react-native-maps";
 import { Picker } from "@react-native-picker/picker";
+import { collection, addDoc } from "firebase/firestore";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "firebase/storage";
-import MapView, { Marker } from "react-native-maps"; // Importer MapView et Marker
+
+import { db } from "../../firebase";
+
+type LocationCoords = {
+  latitude: number;
+  longitude: number;
+};
 
 export default function SignalerScreen() {
   const [description, setDescription] = useState("");
-  const [location, setLocation] = useState(null);
+  const [location, setLocation] = useState<LocationCoords | null>(null);
   const [typeIncident, setTypeIncident] = useState("vol");
-  const [image, setImage] = useState(null);
+  const [service, setService] = useState("police");
+  const [image, setImage] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleGeolocate = async () => {
@@ -34,10 +42,11 @@ export default function SignalerScreen() {
     }
 
     const position = await Location.getCurrentPositionAsync({});
-    setLocation({
+    const coords = {
       latitude: position.coords.latitude,
       longitude: position.coords.longitude,
-    });
+    };
+    setLocation(coords);
   };
 
   const pickImage = async () => {
@@ -53,7 +62,7 @@ export default function SignalerScreen() {
       allowsEditing: true,
     });
 
-    if (!result.canceled) {
+    if (!result.canceled && result.assets?.length) {
       setImage(result.assets[0].uri);
     }
   };
@@ -66,40 +75,33 @@ export default function SignalerScreen() {
 
     try {
       setLoading(true);
+
       const docRef = await addDoc(collection(db, "signalements"), {
         type: typeIncident,
+        serviceConcerné: service,
         description,
         location,
-        image, // l'URI de la photo choisie
         createdAt: new Date(),
       });
 
-      console.log("✅ Signalement envoyé avec succès : ", docRef.id); // Log de l'ID du document Firestore
-
-      // Optionnel : Si une image est ajoutée, on peut la télécharger
       if (image) {
         const response = await fetch(image);
         const blob = await response.blob();
-        const imageRef = ref(getStorage(), `images/${Date.now()}.jpg`);
+        const imageRef = ref(getStorage(), `images/${docRef.id}.jpg`);
         await uploadBytes(imageRef, blob);
-
         const downloadURL = await getDownloadURL(imageRef);
-        console.log("✅ Image téléchargée avec l'URL : ", downloadURL); // Log de l'URL de l'image téléchargée
+        console.log("✅ Image URL :", downloadURL);
       }
 
       Keyboard.dismiss();
-      Alert.alert(
-        "✅ Signalement envoyé",
-        `Votre signalement a été envoyé avec succès !`
-      );
-
-      // Reset
+      Alert.alert("✅ Signalement envoyé", "Merci pour votre contribution !");
       setDescription("");
       setLocation(null);
       setTypeIncident("vol");
+      setService("police");
       setImage(null);
     } catch (error) {
-      console.error("❌ Erreur lors de l'envoi du signalement : ", error);
+      console.error("❌ Erreur : ", error);
       Alert.alert("Erreur", "Impossible d'envoyer le signalement.");
     } finally {
       setLoading(false);
@@ -107,36 +109,43 @@ export default function SignalerScreen() {
   };
 
   return (
-    <ScrollView
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-    >
+    <ScrollView contentContainerStyle={styles.container}>
       <Text style={styles.title}>📝 Signaler un incident</Text>
 
       <Text style={styles.label}>Type d'incident :</Text>
       <View style={styles.pickerContainer}>
-        <Picker
-          selectedValue={typeIncident}
-          onValueChange={(itemValue) => setTypeIncident(itemValue)}
-        >
-          <Picker.Item label="👜 Vol" value="vol" />
-          <Picker.Item label="🤕 Agression" value="agression" />
-          <Picker.Item label="🚗 Accident" value="accident" />
-          <Picker.Item label="🌪️ Catastrophe naturelle" value="catastrophe" />
-          <Picker.Item label="❓ Autre" value="autre" />
+        <Picker selectedValue={typeIncident} onValueChange={setTypeIncident}>
+          <Picker.Item label="Vol" value="vol" />
+          <Picker.Item label="Agression" value="agression" />
+          <Picker.Item label="Accident" value="accident" />
+          <Picker.Item label="Catastrophe naturelle" value="catastrophe" />
+          <Picker.Item label="Autre" value="autre" />
+        </Picker>
+      </View>
+
+      <Text style={styles.label}>Service concerné :</Text>
+      <View style={styles.pickerContainer}>
+        <Picker selectedValue={service} onValueChange={setService}>
+          <Picker.Item label="Police" value="police" />
+          <Picker.Item label="Gendarmerie" value="gendarmerie" />
+          <Picker.Item label="Pompiers" value="pompier" />
+          <Picker.Item label="SAMU" value="samu" />
+          <Picker.Item label="Autre" value="autre" />
         </Picker>
       </View>
 
       <TextInput
         style={styles.input}
-        placeholder="Décris le problème..."
+        placeholder="Décris le problème ici..."
         multiline
         numberOfLines={4}
         value={description}
         onChangeText={setDescription}
       />
 
-      <Button title="📍 Ajouter ma position" onPress={handleGeolocate} />
+      <TouchableOpacity style={styles.actionButton} onPress={handleGeolocate}>
+        <Text style={styles.actionButtonText}>📍 Ajouter ma position</Text>
+      </TouchableOpacity>
 
       {location && (
         <View style={styles.mapContainer}>
@@ -145,45 +154,37 @@ export default function SignalerScreen() {
             initialRegion={{
               latitude: location.latitude,
               longitude: location.longitude,
-              latitudeDelta: 0.0922,
-              longitudeDelta: 0.0421,
+              latitudeDelta: 0.01,
+              longitudeDelta: 0.01,
             }}
           >
             <Marker coordinate={location} />
           </MapView>
-          <Text style={styles.location}>
-            📌 {location.latitude}, {location.longitude}
+          <Text style={styles.locationText}>
+            Coordonnées : {location.latitude}, {location.longitude}
           </Text>
         </View>
       )}
 
-      <View style={{ marginVertical: 10 }}>
-        <Button title="📷 Joindre une photo" onPress={pickImage} />
-      </View>
+      <TouchableOpacity style={styles.actionButton} onPress={pickImage}>
+        <Text style={styles.actionButtonText}>📷 Joindre une photo</Text>
+      </TouchableOpacity>
 
-      {image && (
-        <Image
-          source={{ uri: image }}
-          style={{
-            width: "100%",
-            height: 200,
-            borderRadius: 8,
-            marginBottom: 10,
-          }}
-        />
-      )}
+      {image && <Image source={{ uri: image }} style={styles.imagePreview} />}
 
       <View style={styles.buttons}>
         {loading ? (
-          <ActivityIndicator size="large" color="#007bff" />
+          <ActivityIndicator size="large" color="#007AFF" />
         ) : (
           <>
-            <Button title="Envoyer le signalement" onPress={handleSubmit} />
-            <View style={styles.spacer} />
+            <Button title="📨 Envoyer" onPress={handleSubmit} />
+            <View style={{ height: 12 }} />
             <Button
-              title="🔴 Bouton SOS"
-              color="red"
-              onPress={() => Alert.alert("🚨 SOS", "Appel d’urgence simulé")}
+              title="🚨 SOS"
+              color="#FF3B30"
+              onPress={() =>
+                Alert.alert("🚨 Urgence", "Appel d’urgence simulé.")
+              }
             />
           </>
         )}
@@ -195,58 +196,68 @@ export default function SignalerScreen() {
 const styles = StyleSheet.create({
   container: {
     padding: 20,
-    justifyContent: "center",
+    backgroundColor: "#fff",
     flexGrow: 1,
   },
   title: {
     fontSize: 22,
     fontWeight: "bold",
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: "center",
   },
   label: {
-    fontWeight: "bold",
-    marginBottom: 4,
+    fontWeight: "600",
+    marginBottom: 6,
   },
   pickerContainer: {
     borderColor: "#ccc",
     borderWidth: 1,
-    borderRadius: 8,
+    borderRadius: 10,
     marginBottom: 16,
-    overflow: "hidden",
-    backgroundColor: "#fff",
+    backgroundColor: "#f9f9f9",
   },
   input: {
     height: 120,
     borderColor: "#ccc",
     borderWidth: 1,
+    borderRadius: 10,
     padding: 12,
     marginBottom: 16,
     textAlignVertical: "top",
-    borderRadius: 8,
-    backgroundColor: "#fff",
+    backgroundColor: "#f9f9f9",
   },
-  location: {
-    marginTop: 8,
-    fontStyle: "italic",
-    textAlign: "center",
-    color: "#333",
+  actionButton: {
+    backgroundColor: "#007AFF",
+    padding: 12,
+    borderRadius: 10,
+    alignItems: "center",
+    marginVertical: 8,
   },
-  buttons: {
-    marginTop: 20,
-  },
-  spacer: {
-    height: 12,
+  actionButtonText: {
+    color: "white",
+    fontWeight: "600",
   },
   mapContainer: {
-    width: "100%",
-    height: 250,
-    borderRadius: 8,
+    height: 200,
+    borderRadius: 10,
     overflow: "hidden",
     marginBottom: 10,
   },
   map: {
+    flex: 1,
+  },
+  locationText: {
+    marginTop: 8,
+    fontStyle: "italic",
+    textAlign: "center",
+  },
+  imagePreview: {
     width: "100%",
-    height: "100%",
+    height: 200,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  buttons: {
+    marginTop: 16,
   },
 });
